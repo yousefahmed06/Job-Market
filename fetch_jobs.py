@@ -3,7 +3,7 @@ Fetches current remote job postings from the RemoteOK public API and appends
 a full snapshot to jobs_data.csv on every run (fetch_timestamp marks when
 each snapshot was taken).
 
-RemoteOK's /api endpoint always returns the current pool of live listings —
+RemoteOK's /api endpoint always returns the current pool of live listings --
 there's no per-tag URL that returns a different/larger set (their own client
 libraries filter tags locally after fetching this same feed). So a handful
 of scheduled runs is what gets you to a large row count, not a single trick
@@ -59,7 +59,7 @@ def fetch_jobs() -> list[dict]:
     response = requests.get(API_URL, headers=HEADERS, timeout=15)
     response.raise_for_status()
     data = response.json()
-    # The first element is a legal/notice object, not a job listing — skip it
+    # The first element is a legal/notice object, not a job listing -- skip it
     return [item for item in data if "id" in item]
 
 
