@@ -1,11 +1,15 @@
 """
 Fetches current remote job postings from the RemoteOK public API and appends
-NEW postings (deduped by job id) to jobs_data.csv.
+a full snapshot to jobs_data.csv on every run (fetch_timestamp marks when
+each snapshot was taken).
 
-RemoteOK returns a live snapshot of active listings on every call, so we only
-write rows for job ids we haven't seen before -- otherwise the same postings
-would get duplicated every run. This turns the CSV into a growing archive of
-"jobs as they appeared," useful for tracking hiring trends over time.
+RemoteOK's /api endpoint always returns the current pool of live listings —
+there's no per-tag URL that returns a different/larger set (their own client
+libraries filter tags locally after fetching this same feed). So a handful
+of scheduled runs is what gets you to a large row count, not a single trick
+call. The upside of NOT deduping: since the same job can appear across
+several snapshots, you can group by "id" later and see how long a listing
+stayed active, in addition to counts/trends over time.
 
 Note: RemoteOK's API terms ask that any public use of this data link back to
 the job's RemoteOK URL and credit RemoteOK as the source.
@@ -25,6 +29,8 @@ CSV_FILE = "jobs_data.csv"
 FIELDNAMES = [
     "fetch_timestamp",
     "id",
+    "slug",
+    "epoch",
     "date_posted",
     "company",
     "position",
@@ -33,7 +39,10 @@ FIELDNAMES = [
     "location",
     "salary_min",
     "salary_max",
+    "has_salary",
     "apply_url",
+    "url",
+    "description_length",
 ]
 
 # RemoteOK blocks requests with a generic/default User-Agent, so we send a
@@ -54,21 +63,10 @@ def fetch_jobs() -> list[dict]:
     return [item for item in data if "id" in item]
 
 
-def load_existing_ids() -> set:
-    if not os.path.isfile(CSV_FILE):
-        return set()
-    with open(CSV_FILE, "r", newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        return {row["id"] for row in reader}
-
-
 def main():
     jobs = fetch_jobs()
-    existing_ids = load_existing_ids()
     fetch_time = datetime.now(timezone.utc).isoformat()
-
     file_exists = os.path.isfile(CSV_FILE)
-    new_count = 0
 
     with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
@@ -76,28 +74,29 @@ def main():
             writer.writeheader()
 
         for job in jobs:
-            job_id = str(job.get("id", ""))
-            if not job_id or job_id in existing_ids:
-                continue  # already recorded on a previous run — skip
-
             tags = job.get("tags", [])
+            salary_min = job.get("salary_min", 0) or 0
+            salary_max = job.get("salary_max", 0) or 0
             writer.writerow({
                 "fetch_timestamp": fetch_time,
-                "id": job_id,
+                "id": job.get("id", ""),
+                "slug": job.get("slug", ""),
+                "epoch": job.get("epoch", ""),
                 "date_posted": job.get("date", ""),
                 "company": job.get("company", ""),
                 "position": job.get("position", ""),
                 "tags": "; ".join(tags),
                 "tag_count": len(tags),
                 "location": job.get("location", ""),
-                "salary_min": job.get("salary_min", 0),
-                "salary_max": job.get("salary_max", 0),
+                "salary_min": salary_min,
+                "salary_max": salary_max,
+                "has_salary": bool(salary_min or salary_max),
                 "apply_url": job.get("apply_url", job.get("url", "")),
+                "url": job.get("url", ""),
+                "description_length": len(job.get("description", "")),
             })
-            existing_ids.add(job_id)
-            new_count += 1
 
-    print(f"Added {new_count} new job postings out of {len(jobs)} fetched")
+    print(f"Wrote {len(jobs)} rows for this snapshot")
 
 
 if __name__ == "__main__":
